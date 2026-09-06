@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SVG Code Inspector</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body data-standalone="false">
+
+    <!-- ===================== Header ===================== -->
+    <header class="toolbar">
+        <span class="app-mark" aria-hidden="true">
+            <svg viewBox="0 0 16 16" width="14" height="14">
+                <path d="M2.2 8l3.6-3.9L4.6 3 0 8l4.6 5 1.2-1.1z" fill="currentColor" />
+                <path d="M9.2 3l-2 10h1.6l2-10z" fill="currentColor" />
+                <path d="M13.8 8l-3.6 3.9L11.4 13 16 8l-4.6-5-1.2 1.1z" fill="currentColor" />
+            </svg>
+        </span>
+        <span class="file-title" id="fileTitle" title="">SVG Code Inspector</span>
+        <span class="file-sub" id="fileSub" hidden></span>
+        <span class="spacer"></span>
+        <span class="dirty-badge" id="dirtyBadge" hidden>edited</span>
+        <button id="btnRefresh" class="btn btn-ghost btn-sm" title="Reload file from disk">&#x21bb; Reload</button>
+    </header>
+
+    <!-- ===================== Standalone (browser preview) banner ===================== -->
+    <div id="standaloneBanner" class="banner" hidden>
+        Running in a plain browser — Eagle APIs are not available, so Save / Export / Duplicate are disabled.
+        This preview only shows the UI with a built-in demo SVG.
+    </div>
+
+    <!-- ===================== Pending selection change bar ===================== -->
+    <div id="pendingBar" class="banner pending" hidden>
+        <span>Selection changed while you have unsaved edits.</span>
+        <span class="spacer"></span>
+        <button id="btnDiscard" class="btn btn-ghost btn-sm">Discard &amp; load</button>
+        <button id="btnSaveThenLoad" class="btn btn-sm">Save &amp; load</button>
+    </div>
+
+    <!-- ===================== Content ===================== -->
+    <div id="content" class="content">
+
+        <!-- empty / info state -->
+        <div id="stateBox" class="state-box" hidden>
+            <div class="state-icon" id="stateIcon" aria-hidden="true"></div>
+            <div class="state-title" id="stateTitle"></div>
+            <div class="state-desc" id="stateDesc"></div>
+        </div>
+
+        <div id="main" hidden>
+
+            <!-- ---------- Preview ---------- -->
+            <section class="card" id="secPreview">
+                <button class="card-head" type="button" data-collapse="secPreviewBody">
+                    <span class="caret" aria-hidden="true">&#x25BE;</span> Preview
+                    <span class="card-hint" id="docDims"></span>
+                    <span class="spacer"></span>
+                    <span class="card-toggle" aria-hidden="true">&#x2304;</span>
+                </button>
+                <div class="card-body preview-body" id="secPreviewBody">
+                    <div class="preview-box">
+                        <img id="previewImg" alt="SVG preview" draggable="false" />
+                        <div class="preview-empty" id="previewEmpty" hidden>no renderable SVG</div>
+                    </div>
+                    <div class="row hint" id="previewHint" hidden></div>
+                </div>
+            </section>
+
+            <!-- ---------- Quick edit ---------- -->
+            <section class="card" id="secEdit">
+                <button class="card-head" type="button" data-collapse="secEditBody">
+                    <span class="caret" aria-hidden="true">&#x25BE;</span> Quick edit
+                    <span class="spacer"></span>
+                    <span class="card-toggle" aria-hidden="true">&#x2304;</span>
+                </button>
+                <div class="card-body" id="secEditBody">
+
+                    <!-- Colors -->
+                    <div class="group-label">Recolor an element</div>
+                    <div class="row">
+                        <select id="elSelect" class="input select" disabled></select>
+                    </div>
+                    <div class="row" id="elChannels" hidden>
+                        <label class="channel" id="chFill">
+                            <span class="channel-name">fill</span>
+                            <input type="color" id="elFillInput" class="swatch" />
+                            <input type="text" id="elFillText" class="input mono" spellcheck="false" />
+                        </label>
+                        <label class="channel" id="chStroke">
+                            <span class="channel-name">stroke</span>
+                            <input type="color" id="elStrokeInput" class="swatch" />
+                            <input type="text" id="elStrokeText" class="input mono" spellcheck="false" />
+                        </label>
+                    </div>
+                    <div class="row hint" id="elHint" hidden></div>
+                    <div class="sep"></div>
+
+                    <div class="group-label">Replace a color everywhere</div>
+                    <div class="row">
+                        <select id="paletteSelect" class="input select grow" disabled></select>
+                        <input type="color" id="paletteToInput" class="swatch swatch-lg" value="#ff5a2a" title="New color" />
+                    </div>
+                    <div class="row">
+                        <button id="btnReplace" class="btn" disabled>Replace all occurrences</button>
+                    </div>
+                    <div class="sep"></div>
+
+                    <!-- Size -->
+                    <div class="group-label">Size</div>
+                    <div class="row">
+                        <label class="num">W
+                            <input type="number" id="sizeW" class="input num-input" step="any" min="0" />
+                        </label>
+                        <label class="num">H
+                            <input type="number" id="sizeH" class="input num-input" step="any" min="0" />
+                        </label>
+                        <label class="lock" title="Keep aspect ratio">
+                            <input type="checkbox" id="sizeLock" checked /> lock
+                        </label>
+                    </div>
+                    <div class="row hint" id="sizeHint" hidden></div>
+                </div>
+            </section>
+
+            <!-- ---------- Code ---------- -->
+            <section class="card" id="secCode">
+                <button class="card-head" type="button" data-collapse="secCodeBody">
+                    <span class="caret" aria-hidden="true">&#x25BE;</span> Code
+                    <span class="card-hint" id="codeMeta"></span>
+                    <span class="spacer"></span>
+                    <span class="card-toggle" aria-hidden="true">&#x2304;</span>
+                </button>
+                <div class="card-body code-body" id="secCodeBody">
+                    <div class="code-wrap">
+                        <pre class="code-hl" aria-hidden="true"><code id="codeHl"></code></pre>
+                        <textarea id="codeInput" class="code-input" spellcheck="false"
+                            autocapitalize="off" autocorrect="off" autocomplete="off" wrap="off"></textarea>
+                    </div>
+                    <div class="row hint">
+                        Type in the code to tweak it. <span class="keycap">Ctrl</span>/<span class="keycap">&#8984;</span>+<span class="keycap">S</span> saves to Eagle.
+                    </div>
+                </div>
+            </section>
+
+        </div>
+    </div>
+
+    <!-- ===================== Action bar ===================== -->
+    <footer id="actions" class="actions" hidden>
+        <span class="save-note" id="saveNote"></span>
+        <span class="spacer"></span>
+        <button id="btnCopy" class="btn" title="Copy the SVG code to the clipboard">Copy</button>
+        <button id="btnDuplicate" class="btn" title="Add the edited SVG as a new item in the library">Duplicate to library&#8230;</button>
+        <button id="btnExport" class="btn" title="Write the edited SVG to a file on disk">Export&#8230;</button>
+        <button id="btnSave" class="btn primary" disabled title="Replace the file in Eagle with the current code">Save to Eagle</button>
+    </footer>
+
+    <!-- toast -->
+    <div id="toast" class="toast" hidden></div>
+
+    <script src="js/plugin.js"></script>
+</body>
+
+</html>

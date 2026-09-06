@@ -1,0 +1,7 @@
+# OS junk
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Local working screenshots (the curated ones for the README live in assets/)
+screenshots/

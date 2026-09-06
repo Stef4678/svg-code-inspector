@@ -1,0 +1,28 @@
+{
+    "id": "5d56df8e-2a38-4391-8a06-4243e52bc671",
+    "version": "1.0.0",
+    "platform": "all",
+    "arch": "all",
+    "name": "SVG Code Inspector",
+    "logo": "/logo.png",
+    "keywords": [
+        "svg",
+        "code",
+        "inspector",
+        "xml",
+        "vector",
+        "color",
+        "edit",
+        "recolor"
+    ],
+    "devTools": true,
+    "preview": {
+        "svg": {
+            "inspector": {
+                "path": "index.html",
+                "height": 460,
+                "multiSelect": false
+            }
+        }
+    }
+}
