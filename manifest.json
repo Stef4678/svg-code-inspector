@@ -15,7 +15,7 @@
         "edit",
         "recolor"
     ],
-    "devTools": true,
+    "devTools": false,
     "preview": {
         "svg": {
             "inspector": {
