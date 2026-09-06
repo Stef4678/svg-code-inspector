@@ -71,6 +71,17 @@ file — formatting, comments, entities — is preserved byte-for-byte.
 
 ---
 
+## Requirements
+
+- **Eagle 4.0 Beta 17 or newer** — inspector plugins only exist from this version.
+- A library item whose extension is `svg` — the inspector is scoped to `.svg` files.
+- macOS or Windows — wherever Eagle runs. No Node runtime, build step or third-party
+  dependencies are needed; the plugin is plain HTML / CSS / JS.
+
+> Official docs: [Plugin types — Inspector](https://developer.eagle.cool/plugin-api/get-started/plugin-types/inspector.md)
+
+---
+
 ## Install
 
 ### Option A — packaged plugin (easiest)
@@ -90,9 +101,6 @@ file — formatting, comments, entities — is preserved byte-for-byte.
    `plugin.js`).
 3. Select an SVG in your library — the inspector loads. Right-click the inspector panel and
    choose **Developer Tools** to debug; `devTools: true` is already set in `manifest.json`.
-
-> Requirement: **Eagle 4.0 Beta 17 or newer** (inspector plugins).
-> Official docs: [Plugin types — Inspector](https://developer.eagle.cool/plugin-api/get-started/plugin-types/inspector.md)
 
 ---
 
@@ -185,6 +193,8 @@ Before submitting anywhere:
 | DevTools won't open | `manifest.json` needs `"devTools": true` (already set) and the plugin must have been re-installed after the change. |
 | Save/Export greyed out | The panel is running in standalone demo mode (opened in a browser). Use it inside Eagle. |
 | Error reading the file | The library item's file was moved/deleted; use Reload after restoring it. |
+| The info / "unsaved edits" bar text is unreadable (light text on a light bar) | Install the latest build — the banner bars use solid, high-contrast colours in every Eagle theme. |
+| The panel reloads and content jumps, or a thin bar flashes at the bottom | Install the latest build — an unchanged file is no longer re-read on the 1 s poll, so there is no reload flash or layout shift; **Reload** still forces a fresh read. |
 
 ## Docs referenced
 
@@ -194,3 +204,18 @@ Before submitting anywhere:
 - [Item API](https://developer.eagle.cool/plugin-api/api/item.md)
 - [Accessing local files](https://developer.eagle.cool/plugin-api/tutorial/access-local-files.md)
 - [Packaging](https://developer.eagle.cool/plugin-api/publishing/package.md)
+
+---
+
+## Contact
+
+Questions, bug reports and feature requests are welcome:
+
+- GitHub: [Stef4678/svg-code-inspector](https://github.com/Stef4678/svg-code-inspector)
+- Email: [stefaninfp@gmail.com](mailto:stefaninfp@gmail.com)
+
+## License
+
+Released under the [MIT License](LICENSE).
+
+MIT © 2026 Kerekes Stefan
