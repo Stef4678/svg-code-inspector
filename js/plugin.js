@@ -865,7 +865,67 @@ function updateDirtyUI() {
         $('#saveNote').textContent = '';
     }
     if (state.item) {
-        $('#btnSave').title = dirty ? 'Replace the file in Eagle with the current code' : 'No changes yet';
+        $('#btnSave').title = dirty
+            ? 'Replace the file in Eagle (asks you to confirm first, and backs up the original)'
+            : 'No changes yet';
+    }
+}
+
+/**
+ * Show an explicit confirmation before the original file is overwritten.
+ * Returns one of:
+ *   'overwrite' — the user confirmed replacing the original item file in place.
+ *   'copy'      — the user chose to save a copy instead (original stays untouched).
+ *   'cancel'    — the user cancelled (or the dialog could not be shown), so the
+ *                 original must not be changed.
+ */
+async function confirmSaveDestination() {
+    const buttons = ['Cancel', 'Overwrite original', 'Save a copy…'];
+    const opts = {
+        title: 'Replace the original SVG?',
+        message: 'Overwrite “' + state.fileName + '” in Eagle with the code in this panel?',
+        detail: 'Saving in place replaces the item’s current file in your library — the original is overwritten '
+            + 'and the previous version is no longer the item’s file. Before replacing it, SVG Code Inspector '
+            + 'writes a backup of the current SVG to a temporary file (the path is shown after saving) so you '
+            + 'can recover the previous version from there. If you would rather leave the original untouched, '
+            + 'choose “Save a copy…” to add the edited SVG as a new library item instead.',
+        buttons,
+        type: 'warning',
+        defaultId: 1,
+        cancelId: 0,
+        noLink: true,
+    };
+    let res;
+    try {
+        res = await eagleAPI.dialog.showMessageBox(opts);
+    } catch (e) {
+        console.error(e);
+        showToast('Save cancelled — the original file is unchanged.', true);
+        return 'cancel';
+    }
+    const idx = res && typeof res.response === 'number' ? res.response : 0;
+    if (idx === 1) return 'overwrite';
+    if (idx === 2) return 'copy';
+    return 'cancel';
+}
+
+/**
+ * Write the current (pre-replace) original file content to a dedicated backup
+ * file so the user can recover the version that is about to be overwritten.
+ * Returns the backup path, or null when the backup could not be written.
+ */
+async function writePreSaveBackup() {
+    const keyId = (state.itemId || 'item').replace(/[^\w-]/g, '');
+    const base = (os && os.tmpdir) ? os.tmpdir() : '.';
+    const baseName = (state.fileName || 'item').replace(/\.svg$/i, '');
+    const fname = 'svg-inspector-' + baseName + '-' + keyId + '-' + Date.now().toString(36) + '.pre-save.svg';
+    const bp = (path && path.join) ? path.join(base, fname) : base + '/' + fname;
+    try {
+        await fs.promises.writeFile(bp, state.origCode, 'utf8');
+        return bp;
+    } catch (e) {
+        console.warn('Could not write pre-save backup:', e);
+        return null;
     }
 }
 
@@ -875,6 +935,19 @@ async function doSave() {
     if (!state.item) { showToast('Nothing to save.', true); return; }
     if (code === state.origCode) { showToast('No changes to save.'); return; }
     if (!fs) { showToast('Node fs unavailable.', true); return; }
+
+    // Explicit confirm before anything is overwritten. Applies to every save
+    // entry point: the "Save to Eagle" button, Ctrl/Cmd+S and "Save & load".
+    const choice = await confirmSaveDestination();
+    if (choice === 'cancel') { showToast('Save cancelled — the original file is unchanged.'); return; }
+    if (choice === 'copy') { await doDuplicate(); return; }
+
+    // Back up the current original so the version being replaced stays recoverable.
+    const backup = await writePreSaveBackup();
+    if (!backup) {
+        showToast('Could not create a backup — save cancelled so the original file stays intact.', true);
+        return;
+    }
 
     const tmp = tmpSvgPath(Date.now().toString(36));
     try {
@@ -891,7 +964,7 @@ async function doSave() {
         state.code = code;
         updateDirtyUI();
         try { await fs.promises.unlink(tmp); } catch (e2) { /* best effort */ }
-        showToast('Saved to Eagle ✓');
+        showToast('Saved to Eagle ✓ (backup: ' + backup + ')');
     } catch (e) {
         console.error(e);
         showToast('Eagle rejected the save: ' + (e && e.message ? e.message : e), true);

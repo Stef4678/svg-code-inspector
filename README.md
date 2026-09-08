@@ -59,7 +59,7 @@ svg-code-inspector/            ← the plugin itself (this repository root)
 | **Recolor an element** | Pick a shape from the list (each entry shows its `fill`/`stroke`), then change its fill or stroke via a colour picker or a raw-value field (`#hex`, `none`, `rgb(...)`, `url(#id)`, …). |
 | **Replace a color everywhere** | The palette dropdown lists every hex colour used in the file with occurrence counts; pick one, choose a new colour, and replace all of its uses in one click (both `fill="#…"` attributes and `style="fill: …"` declarations). `url(#fragment)` references are never touched. |
 | **Size** | Change the `<svg>` width/height numerically. Units are preserved (`12pt` → `640pt`); missing attributes are inserted; the lock keeps the aspect ratio (from width/height or `viewBox`). |
-| **Save to Eagle** | Writes the edited SVG to a temp file and swaps it in with the officially recommended `item.replaceFile()`, which refreshes the thumbnail automatically. |
+| **Save to Eagle** | Writes the edited SVG to a temp file and swaps it in with the officially recommended `item.replaceFile()`, which refreshes the thumbnail automatically. It asks you to confirm and backs up the current SVG first, so nothing is overwritten by surprise. |
 | **Duplicate to library…** | Imports the edited SVG as a new Eagle item — the original stays untouched. |
 | **Export…** | Native save dialog → writes the edited SVG anywhere on disk. |
 | **Copy** | Copy the whole code to the clipboard. |
@@ -123,9 +123,12 @@ file — formatting, comments, entities — is preserved byte-for-byte.
 
 ## Safety notes
 
-- **Save to Eagle replaces the item's actual file.** Eagle's recommended flow is used (temp
-  file → `item.replaceFile()`), but treat it like any overwrite: use *Duplicate* / *Export*
-  when you are not sure.
+- **Save to Eagle replaces the item's actual file in your library.** Eagle's recommended flow
+  is used (temp file → `item.replaceFile()`), and before anything is replaced the plugin shows
+  an explicit confirmation that names the target file and explains the overwrite, offers a
+  **Cancel** and a **Save a copy…** option, and writes a backup of the current SVG to a
+  temporary file first (the backup path is shown after saving) so the previous version can be
+  recovered. Saving a copy or using **Export…** leaves the original untouched.
 - If you type malformed XML, the quick-edit tools disable with a message; the code editor
   stays usable so you can fix it. The preview simply shows the previous renderable state.
 
@@ -146,13 +149,22 @@ file — formatting, comments, entities — is preserved byte-for-byte.
 
 **In Eagle:** Plugins panel → right-click the plugin → *Pack Plugin* → `.eagleplugin`.
 
-**Manually:** zip only the five plugin files from this repository root (so `manifest.json`
-sits at the archive root) and rename the file to `SVG-Code-Inspector.eagleplugin`:
+**Manually:** stage the five plugin files into a temp folder (keeping the `js/` subfolder) and
+zip that folder, then rename to `SVG-Code-Inspector.eagleplugin`. `manifest.json` must sit at
+the archive root:
 
 ```powershell
-Compress-Archive -Path .\manifest.json, .\logo.png, .\index.html, .\style.css, .\js\plugin.js `
-                 -DestinationPath .\dist\SVG-Code-Inspector.eagleplugin
+$stage = Join-Path $env:TEMP ('svgci-pack-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Force -Path $stage, (Join-Path $stage 'js') | Out-Null
+Copy-Item .\manifest.json, .\logo.png, .\index.html, .\style.css -Destination $stage
+Copy-Item .\js\plugin.js -Destination (Join-Path $stage 'js\plugin.js')
+Compress-Archive -Path (Join-Path $stage '*') -DestinationPath .\dist\SVG-Code-Inspector.eagleplugin
+Remove-Item $stage -Recurse -Force
 ```
+
+> Do **not** use `Compress-Archive -Path .\js\plugin.js` directly: it flattens the file to
+> `plugin.js` at the archive root, but `index.html` loads `js/plugin.js` — so the inspector
+> panel would fail to start. The packaged `js/` folder is required.
 
 `tools/`, `dist/` and `README.md` are development artifacts and must not be packed.
 
@@ -182,6 +194,9 @@ Before submitting anywhere:
 - Saving follows the documented best practice: write the new version to a temp file, then
   `item.replaceFile(tmpPath)`, which replaces the original and refreshes the thumbnail
   ([item docs](https://developer.eagle.cool/plugin-api/api/item.md#replacefilefilepath)).
+  Before replacing, the panel confirms the overwrite (naming the target file), backs up the
+  current SVG to a temporary file, and offers a **Save a copy…** path that leaves the
+  original untouched.
 - In a plain browser the plugin boots in *standalone demo mode* (a built-in demo SVG) so you
   can preview the UI by opening `index.html` directly — Eagle APIs are disabled there.
 
