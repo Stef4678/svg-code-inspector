@@ -59,7 +59,7 @@ svg-code-inspector/            ← the plugin itself (this repository root)
 | **Recolor an element** | Pick a shape from the list (each entry shows its `fill`/`stroke`), then change its fill or stroke via a colour picker or a raw-value field (`#hex`, `none`, `rgb(...)`, `url(#id)`, …). |
 | **Replace a color everywhere** | The palette dropdown lists every hex colour used in the file with occurrence counts; pick one, choose a new colour, and replace all of its uses in one click (both `fill="#…"` attributes and `style="fill: …"` declarations). `url(#fragment)` references are never touched. |
 | **Size** | Change the `<svg>` width/height numerically. Units are preserved (`12pt` → `640pt`); missing attributes are inserted; the lock keeps the aspect ratio (from width/height or `viewBox`). |
-| **Save to Eagle** | Writes the edited SVG to a temp file and swaps it in with the officially recommended `item.replaceFile()`, which refreshes the thumbnail automatically. It asks you to confirm and backs up the current SVG first, so nothing is overwritten by surprise. |
+| **Save to Eagle** | Writes the edited SVG to a temp file and swaps it in with the officially recommended `item.replaceFile()`, which refreshes the thumbnail automatically. Before anything is replaced it re-reads the file, refuses to continue if it changed on disk since it was loaded, confirms the overwrite with **Cancel** preselected, and backs up the exact contents being replaced first — so nothing is overwritten by surprise and no backup is stale. |
 | **Duplicate to library…** | Imports the edited SVG as a new Eagle item — the original stays untouched. |
 | **Export…** | Native save dialog → writes the edited SVG anywhere on disk. |
 | **Copy** | Copy the whole code to the clipboard. |
@@ -100,7 +100,8 @@ file — formatting, comments, entities — is preserved byte-for-byte.
    (`manifest.json`, `logo.png`, `index.html`, `style.css`, and the `js/` folder with
    `plugin.js`).
 3. Select an SVG in your library — the inspector loads. Right-click the inspector panel and
-   choose **Developer Tools** to debug; `devTools: true` is already set in `manifest.json`.
+   choose **Developer Tools** to debug — set `"devTools": true` in `manifest.json` first
+   (release builds ship with `false`) and re-install the plugin after changing it.
 
 ---
 
@@ -119,16 +120,31 @@ file — formatting, comments, entities — is preserved byte-for-byte.
      the aspect ratio.
 4. Any of the above marks the file as *edited*; **Save to Eagle** commits it as the item's
    real file. For experiments, use **Duplicate to library…** or **Export…** instead — the
-   original is preserved.
+   original is preserved. Saving runs through the guard described under *Safety notes*: it
+   never replaces a file that changed on disk while you were editing.
 
 ## Safety notes
 
 - **Save to Eagle replaces the item's actual file in your library.** Eagle's recommended flow
-  is used (temp file → `item.replaceFile()`), and before anything is replaced the plugin shows
-  an explicit confirmation that names the target file and explains the overwrite, offers a
-  **Cancel** and a **Save a copy…** option, and writes a backup of the current SVG to a
-  temporary file first (the backup path is shown after saving) so the previous version can be
-  recovered. Saving a copy or using **Export…** leaves the original untouched.
+  is used (temp file → `item.replaceFile()`), and every save runs through the same guard —
+  the **Save to Eagle** button, `Ctrl/Cmd + S` and **Save & load**:
+
+  1. **The original is re-read from disk and compared with the version that was loaded.** The
+     panel keeps showing an item that stays selected without re-reading it, so another app or
+     tool may have changed the file in the meantime. If it did — or if it cannot be read at all —
+     the save stops and you are offered **Reload from disk** (discard the panel's edits and show
+     the current file) or **Save a copy…** (keep your edits as a new library item). The original
+     is never replaced in that case, and no overwrite-anyway option is offered.
+  2. **You confirm the overwrite explicitly.** The dialog names the target file and its buttons
+     are `Cancel`, `Overwrite original`, `Save a copy…` — **Cancel is preselected and is also the
+     Esc / close action**, so a stray `Enter` never replaces the original.
+  3. **The exact contents being replaced are backed up** to a temporary `.pre-save.svg` file
+     (the path is shown after saving). The backup is written from the fresh re-read, not from
+     the copy loaded in the panel. **If the backup cannot be written, the save is cancelled.**
+  4. **The file is re-checked once more immediately before the swap**, so a change that lands
+     while the dialogs are open still cancels the save instead of being overwritten.
+
+  Saving a copy or using **Export…** leaves the original untouched.
 - If you type malformed XML, the quick-edit tools disable with a message; the code editor
   stays usable so you can fix it. The preview simply shows the previous renderable state.
 
@@ -194,9 +210,11 @@ Before submitting anywhere:
 - Saving follows the documented best practice: write the new version to a temp file, then
   `item.replaceFile(tmpPath)`, which replaces the original and refreshes the thumbnail
   ([item docs](https://developer.eagle.cool/plugin-api/api/item.md#replacefilefilepath)).
-  Before replacing, the panel confirms the overwrite (naming the target file), backs up the
-  current SVG to a temporary file, and offers a **Save a copy…** path that leaves the
-  original untouched.
+  Before replacing, the panel re-reads the file from disk (`fs.promises.readFile` on
+  `item.filePath`) and compares it with the editing baseline; a mismatch — or an unreadable
+  file — aborts the save and offers reload / save-a-copy. It then confirms the overwrite with
+  **Cancel** preselected (`defaultId: 0`, `cancelId: 0`), writes a backup of the freshly read
+  contents, and re-checks the file once more before calling `replaceFile()`.
 - In a plain browser the plugin boots in *standalone demo mode* (a built-in demo SVG) so you
   can preview the UI by opening `index.html` directly — Eagle APIs are disabled there.
 
@@ -208,8 +226,28 @@ Before submitting anywhere:
 | DevTools won't open | `manifest.json` needs `"devTools": true` (already set) and the plugin must have been re-installed after the change. |
 | Save/Export greyed out | The panel is running in standalone demo mode (opened in a browser). Use it inside Eagle. |
 | Error reading the file | The library item's file was moved/deleted; use Reload after restoring it. |
+| "The original SVG changed on disk" when saving | Another app or tool edited the file while the panel had it open. Choose **Reload from disk** to pick up the current version, or **Save a copy…** to keep your edits as a new item — the original is left untouched. |
+| "The original SVG could not be re-read" when saving | The item's file is no longer at the recorded path (moved/renamed/removed). Save a copy, then re-add the file to the library. |
 | The info / "unsaved edits" bar text is unreadable (light text on a light bar) | Install the latest build — the banner bars use solid, high-contrast colours in every Eagle theme. |
 | The panel reloads and content jumps, or a thin bar flashes at the bottom | Install the latest build — an unchanged file is no longer re-read on the 1 s poll, so there is no reload flash or layout shift; **Reload** still forces a fresh read. |
+
+## Version history
+
+- **1.0.2** — hardens the save path (review feedback on 1.0.1):
+  - the overwrite confirmation now preselects **Cancel** (`defaultId: 0` / `cancelId: 0`), so a
+    plain `Enter`, `Esc` or a closed dialog never replaces the original; the same dialog is used
+    by the **Save to Eagle** button, `Ctrl/Cmd + S` and **Save & load**;
+  - the file is re-read from disk immediately before saving and compared with the editing
+    baseline — if it changed (or cannot be read), the save stops and offers *Reload from disk*
+    or *Save a copy…* instead of overwriting newer contents;
+  - the pre-save backup is written from that fresh re-read, so it always holds the exact
+    contents being replaced, and **a failed backup cancels the overwrite**;
+  - the file is re-checked once more right before `replaceFile()` to close the dialog window;
+  - `tools/smoke-test.cjs` now drives the whole save path (dialog defaults, stale original,
+    unreadable original, backup failure, late change, and all three save entry points).
+- **1.0.1** — fixed the packaged layout (`js/plugin.js` must stay in the `js/` folder) and added
+  the save confirmation + backup.
+- **1.0.0** — first release.
 
 ## Docs referenced
 

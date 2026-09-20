@@ -13,6 +13,12 @@
    • Save back to the Eagle item via the officially recommended
      item.replaceFile() flow (temp file first), export a copy to disk, or
      duplicate the edited SVG as a new library item.
+     Saving in place is guarded (see doSave): the file is re-read from disk and
+     compared with the editing baseline before anything is replaced — an
+     externally changed or unreadable file stops the save and offers reload or
+     save-a-copy — the overwrite confirmation defaults to Cancel, the exact
+     contents being replaced are backed up (a failed backup cancels the save),
+     and the file is re-checked once more immediately before replaceFile().
 
    Requires Eagle 4.0 Beta 17+ (inspector plugins). Set "devTools": true in
    manifest.json to debug via DevTools while developing.
@@ -776,7 +782,7 @@ async function loadCurrentItem(force) {
 }
 
 async function doLoad(item) {
-    if (state.busy) return;
+    if (state.busy) return false;
     state.busy = true;
     setLoading(true);
     try {
@@ -801,10 +807,12 @@ async function doLoad(item) {
         refreshParseUI();
         updateDirtyUI();
         syncScroll();
+        return true;
     } catch (err) {
         console.error(err);
         showState('&#9888;', 'Could not read the SVG file',
             (err && err.message ? err.message : String(err)) + '\n\nIt may have been moved, renamed or deleted.');
+        return false;
     } finally {
         state.busy = false;
         setLoading(false);
@@ -866,13 +874,17 @@ function updateDirtyUI() {
     }
     if (state.item) {
         $('#btnSave').title = dirty
-            ? 'Replace the file in Eagle (asks you to confirm first, and backs up the original)'
+            ? 'Replace the file in Eagle — re-reads it first, asks you to confirm (Cancel is preselected) '
+              + 'and backs up the exact contents being replaced'
             : 'No changes yet';
     }
 }
 
 /**
  * Show an explicit confirmation before the original file is overwritten.
+ * "Cancel" is the default and the cancel action, so a stray Enter / Esc / dialog
+ * dismissal never replaces the original: the user has to pick "Overwrite
+ * original" deliberately.
  * Returns one of:
  *   'overwrite' — the user confirmed replacing the original item file in place.
  *   'copy'      — the user chose to save a copy instead (original stays untouched).
@@ -886,13 +898,15 @@ async function confirmSaveDestination() {
         message: 'Overwrite “' + state.fileName + '” in Eagle with the code in this panel?',
         detail: 'Saving in place replaces the item’s current file in your library — the original is overwritten '
             + 'and the previous version is no longer the item’s file. Before replacing it, SVG Code Inspector '
-            + 'writes a backup of the current SVG to a temporary file (the path is shown after saving) so you '
-            + 'can recover the previous version from there. If you would rather leave the original untouched, '
-            + 'choose “Save a copy…” to add the edited SVG as a new library item instead.',
+            + 're-reads the file and stops if it changed since it was loaded, then writes a backup of the exact '
+            + 'contents being replaced to a temporary file (the path is shown after saving) so you can recover '
+            + 'the previous version from there. “Cancel” is preselected — nothing is overwritten unless you '
+            + 'choose “Overwrite original”. If you would rather leave the original untouched, choose '
+            + '“Save a copy…” to add the edited SVG as a new library item instead.',
         buttons,
         type: 'warning',
-        defaultId: 1,
-        cancelId: 0,
+        defaultId: 0, // Cancel — Enter must never overwrite the original
+        cancelId: 0,  // Esc / closing the dialog cancels too
         noLink: true,
     };
     let res;
@@ -910,18 +924,108 @@ async function confirmSaveDestination() {
 }
 
 /**
- * Write the current (pre-replace) original file content to a dedicated backup
- * file so the user can recover the version that is about to be overwritten.
+ * Re-read the file that is about to be replaced, straight from disk.
+ * state.origCode is only a snapshot taken when the item was loaded (the panel
+ * does not re-read an item that stays selected), so it can be older than what
+ * is actually on disk right now.
+ * Returns { ok: true, text } or { ok: false, why }.
+ */
+async function readLiveOriginal() {
+    if (!fs || !state.origPath) return { ok: false, why: 'the original file path is unknown' };
+    try {
+        const text = await fs.promises.readFile(state.origPath, 'utf8');
+        return { ok: true, text };
+    } catch (e) {
+        return { ok: false, why: (e && e.message) ? e.message : String(e) };
+    }
+}
+
+/**
+ * Classify a fresh read of the original against the editing baseline.
+ * Pure (no I/O) so the save guard stays testable.
+ *   'ok'         — identical to what was loaded; safe to back up and replace.
+ *   'changed'    — changed on disk since it was loaded; do not overwrite.
+ *   'unreadable' — could not be read at all; do not overwrite.
+ */
+function classifyOriginalRead(read, baseline) {
+    if (!read || read.ok !== true || typeof read.text !== 'string') return 'unreadable';
+    return read.text === baseline ? 'ok' : 'changed';
+}
+
+/**
+ * The original changed on disk (or could not be re-read) since it was loaded,
+ * so it must not be overwritten: the newer contents would be lost and a backup
+ * of the loaded copy would not match what is really being replaced.
+ * Offers reload-from-disk or save-as-a-new-item; "Cancel" is the default and
+ * the cancel action, so Enter / Esc never discards the user's work either.
+ * Returns 'reload' | 'copy' | 'cancel'.
+ */
+async function confirmStaleOriginal(kind, why) {
+    const changed = kind === 'changed';
+    const opts = {
+        title: changed ? 'The original SVG changed on disk' : 'The original SVG could not be re-read',
+        message: changed
+            ? '“' + state.fileName + '” is not the version that was loaded into this panel.'
+            : '“' + state.fileName + '” could not be read from disk just now.',
+        detail: (changed
+            ? 'Another app or tool changed the original file after it was loaded here. Overwriting it now would '
+              + 'destroy those newer contents, and a backup taken from the copy loaded in this panel would not '
+              + 'match what is actually on disk.'
+            : 'Reason: ' + (why || 'unknown') + '. Overwriting could replace contents this panel never saw, so the '
+              + 'save was stopped.')
+            + '\n\n“Reload from disk” discards the edits in this panel and shows the current file. '
+            + '“Save a copy…” keeps your edits and adds them to your library as a new item, leaving the original '
+            + 'untouched. “Cancel” changes nothing.',
+        buttons: ['Cancel', 'Reload from disk', 'Save a copy…'],
+        type: 'warning',
+        defaultId: 0, // Cancel
+        cancelId: 0,
+        noLink: true,
+    };
+    let res;
+    try {
+        res = await eagleAPI.dialog.showMessageBox(opts);
+    } catch (e) {
+        console.error(e);
+        showToast('Save cancelled — the original file is unchanged.', true);
+        return 'cancel';
+    }
+    const idx = res && typeof res.response === 'number' ? res.response : 0;
+    if (idx === 1) return 'reload';
+    if (idx === 2) return 'copy';
+    return 'cancel';
+}
+
+/** Re-read the currently loaded item from disk, discarding in-panel edits.
+ *  Returns true when the file was re-read, false when that failed. */
+async function reloadOriginalFromDisk() {
+    let item = state.item;
+    if (eagleAPI && state.itemId) {
+        try {
+            const fresh = await eagleAPI.item.getById(state.itemId);
+            if (fresh) item = fresh; // picks up a renamed / moved file path
+        } catch (e) { /* keep the item we already have */ }
+    }
+    if (item) return (await doLoad(item)) === true;
+    await loadCurrentItem(true);
+    return true;
+}
+
+/**
+ * Write the contents that are about to be replaced to a dedicated backup file
+ * so the user can recover the version that is lost. `contents` must be what was
+ * just re-read from the original path — never a stale in-panel copy.
  * Returns the backup path, or null when the backup could not be written.
  */
-async function writePreSaveBackup() {
+async function writePreSaveBackup(contents) {
+    if (typeof contents !== 'string') return null;
     const keyId = (state.itemId || 'item').replace(/[^\w-]/g, '');
     const base = (os && os.tmpdir) ? os.tmpdir() : '.';
     const baseName = (state.fileName || 'item').replace(/\.svg$/i, '');
     const fname = 'svg-inspector-' + baseName + '-' + keyId + '-' + Date.now().toString(36) + '.pre-save.svg';
     const bp = (path && path.join) ? path.join(base, fname) : base + '/' + fname;
     try {
-        await fs.promises.writeFile(bp, state.origCode, 'utf8');
+        await fs.promises.writeFile(bp, contents, 'utf8');
         return bp;
     } catch (e) {
         console.warn('Could not write pre-save backup:', e);
@@ -936,14 +1040,37 @@ async function doSave() {
     if (code === state.origCode) { showToast('No changes to save.'); return; }
     if (!fs) { showToast('Node fs unavailable.', true); return; }
 
-    // Explicit confirm before anything is overwritten. Applies to every save
-    // entry point: the "Save to Eagle" button, Ctrl/Cmd+S and "Save & load".
+    // 1. Re-read the file that is about to be replaced and compare it with the
+    //    editing baseline. The panel keeps showing an item that stays selected
+    //    without re-reading it, so another tool may have changed the file in the
+    //    meantime; overwriting then would destroy the newer contents while the
+    //    backup held the older loaded copy. Stop and let the user decide.
+    const live = await readLiveOriginal();
+    const verdict = classifyOriginalRead(live, state.origCode);
+    if (verdict !== 'ok') {
+        const stale = await confirmStaleOriginal(verdict, live && live.why);
+        if (stale === 'reload') {
+            // doLoad() shows its own error state if the file cannot be read.
+            if (await reloadOriginalFromDisk()) {
+                showToast('Reloaded “' + state.fileName + '” from disk — panel edits were discarded.');
+            }
+            return;
+        }
+        if (stale === 'copy') { await doDuplicate(); return; }
+        showToast('Save cancelled — the original file is unchanged.');
+        return;
+    }
+
+    // 2. Explicit confirm before anything is overwritten; "Cancel" is the
+    //    default, so Enter never replaces the original. Applies to every save
+    //    entry point: the "Save to Eagle" button, Ctrl/Cmd+S and "Save & load".
     const choice = await confirmSaveDestination();
     if (choice === 'cancel') { showToast('Save cancelled — the original file is unchanged.'); return; }
     if (choice === 'copy') { await doDuplicate(); return; }
 
-    // Back up the current original so the version being replaced stays recoverable.
-    const backup = await writePreSaveBackup();
+    // 3. Back up the exact bytes being replaced (the fresh read, not the loaded
+    //    copy). No backup means no overwrite.
+    const backup = await writePreSaveBackup(live.text);
     if (!backup) {
         showToast('Could not create a backup — save cancelled so the original file stays intact.', true);
         return;
@@ -957,6 +1084,17 @@ async function doSave() {
         showToast('Could not write temp file: ' + e.message, true);
         return;
     }
+
+    // 4. Last check before the swap: if the file changed again while the dialogs
+    //    were open, the backup no longer describes what would be replaced — stop.
+    const recheck = await readLiveOriginal();
+    if (classifyOriginalRead(recheck, live.text) !== 'ok') {
+        try { await fs.promises.unlink(tmp); } catch (e2) { /* best effort */ }
+        showToast('Save cancelled — the original changed while saving, nothing was replaced (backup: '
+            + backup + ').', true);
+        return;
+    }
+
     try {
         const ok = await state.item.replaceFile(tmp);
         if (ok === false) throw new Error('replaceFile returned false');
@@ -1088,6 +1226,9 @@ function wireUI() {
                     detail: state.fileName,
                     buttons: ['Cancel', 'Discard & reload'],
                     type: 'warning',
+                    defaultId: 0, // Cancel — Enter must not throw away unsaved edits
+                    cancelId: 0,
+                    noLink: true,
                 });
             } catch (e) { /* standalone: fall through to reload */ res = { response: 0 }; }
             if (res && res.response === 0) return;
